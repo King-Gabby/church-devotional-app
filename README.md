@@ -1,7 +1,24 @@
-# ✝️ Church Devotional Platform v2
+# ✝️ Church Devotional Platform v3
 
-> A production-ready, modular devotional generator for church congregations and media teams.
-> Powered by **Google Gemini 1.5 Flash** + **bible-api.com**.
+> **"The Word"** — AI-assisted digital discipleship infrastructure.
+> Powered by Google Gemini 1.5 Flash + bible-api.com.
+
+---
+
+## What's New in v3
+
+| Feature | Status |
+|---|---|
+| ☀️ Daily devotional (shared, date-deterministic) | ✅ New |
+| 🗺️ 7-Day topic journeys | ✅ New |
+| 🎙️ Sermon outline generator (3 audiences) | ✅ New |
+| 📚 Bible study notes mode | ✅ New |
+| 🙏 Prayer generator (personal / congregation / intercessory) | ✅ New |
+| ⭐ Save / favorite devotionals | ✅ New |
+| 🔥 Streak tracking | ✅ New |
+| 📊 Analytics with clear history | ✅ New |
+| ✓ Trust layer ("powered by real scripture") | ✅ New |
+| 🌍 Offline daily verse cache | ✅ New |
 
 ---
 
@@ -9,14 +26,14 @@
 
 ```
 church-devotional-app/
-├── app.py                        # Streamlit UI — navigation, layout, rendering
+├── app.py                          # Streamlit UI — 10 modes
 ├── services/
-│   ├── gemini_client.py          # Gemini API wrapper (all LLM calls here)
-│   ├── verse_service.py          # Bible verse fetching + topic maps
-│   └── devotional_engine.py      # Devotional generation logic
+│   ├── gemini_client.py            # Gemini 1.5 Flash wrapper
+│   ├── verse_service.py            # Bible API + journeys + daily verse
+│   └── devotional_engine.py        # Devotional / Sermon / Prayer / Study
 ├── utils/
-│   ├── formatters.py             # Social media + export formatting
-│   └── storage.py                # CSV history + analytics
+│   ├── formatters.py               # Social export (IG / WA / Twitter / TXT)
+│   └── storage.py                  # History + Favorites + Analytics + Streak
 ├── requirements.txt
 ├── .env.example
 └── README.md
@@ -26,86 +43,66 @@ church-devotional-app/
 
 ## Quick Start
 
-### 1. Install dependencies
 ```bash
 pip install -r requirements.txt
-```
-
-### 2. Set your Gemini API key
-```bash
-cp .env.example .env
-# Edit .env and add your key
-```
-
-Get a free API key at: https://aistudio.google.com/app/apikey
-
-### 3. Run
-```bash
+cp .env.example .env       # add GEMINI_API_KEY
 streamlit run app.py
 ```
 
----
-
-## Architecture Decisions
-
-| Layer | Module | Decision |
-|---|---|---|
-| LLM | `gemini_client.py` | Single entry point for all Gemini calls. Exponential retry backoff. Safety filters on. Swap model in one place. |
-| Verse data | `verse_service.py` | API-first, 3-tier fallback: try selected ref → try alternates → emergency constant. AI **never** touches Bible text. |
-| Content gen | `devotional_engine.py` | Strict JSON contract with Gemini. Regex-strips markdown fences. Safe defaults if parse fails. AI scope explicitly limited in prompt. |
-| Formatting | `formatters.py` | Zero AI calls. Pure string logic. Platform limits enforced. Easy to add new platforms. |
-| Persistence | `storage.py` | Interface-first design. 4 functions. Swap CSV → SQLite by reimplementing internals only. |
-| UI | `app.py` | Thin orchestration. All business logic in services/utils. Migratable to FastAPI + React with no logic changes. |
+Get your free Gemini API key: https://aistudio.google.com/app/apikey
 
 ---
 
-## Features
+## App Modes
 
-### Verse Selection
-- **Random** — random topic + weighted verse
-- **Topic-based** — 12 topics, 6 verses each, weighted random (first 2 = 2× probability)
-- **Custom reference** — any valid Bible ref (e.g. `Psalm 23:1`)
-- **Quick pick chips** — one-click popular verses in Search mode
-- **3-tier fallback** — primary ref → alternates → hardcoded emergency
-
-### Devotional Content (Gemini-generated)
-All content is generated from a **real API verse**. Gemini only produces:
-- Explanation (2–3 sentences, pastoral tone)
-- Reflection question (personal)
-- Application (one action today)
-- Memory summary (≤12 words, optional)
-- Prayer prompt (short, optional)
-
-### Social Export
-| Platform | Format | Limit |
-|---|---|---|
-| Instagram | Full devotional + hashtags | 2,200 chars |
-| WhatsApp | Bold/italic condensed | 700 chars |
-| Twitter/X | Ref + memory + tag | 280 chars |
-
-### Analytics & History
-- Topic frequency bar chart
-- Total / unique / top-topic metrics
-- Last 25 devotionals in expandable history
-- CSV export of full history
-
----
-
-## Bible Translations
-| Code | Name |
+| Mode | Description |
 |---|---|
-| `kjv` | King James Version |
-| `web` | World English Bible |
-| `bbe` | Basic English Bible |
+| ☀️ Today's Word | One devotional for the whole congregation, same all day, cached |
+| 📖 Topic Devotional | Choose from 12 themes, get a verse + devotional |
+| 🗺️ 7-Day Journey | Guided 7-day plans on Anxiety, Faith, Purpose, Strength |
+| 🎙️ Sermon Mode | Full sermon outline for Sunday service, youth, or small group |
+| 📚 Bible Study | Context, key words, cross-refs, discussion prompts |
+| 🙏 Prayer Generator | Personal, congregation, or intercessory prayers |
+| 🔍 Search Verse | Any Bible reference → instant devotional |
+| ⭐ Favorites | Bookmark and revisit saved devotionals |
+| 📊 Analytics | Topic frequency, streak, history export |
+| 📁 History | Last 30 devotionals with full content |
+
+---
+
+## Daily Devotional — How It Works
+
+`get_daily_verse()` uses an MD5 hash of the calendar date to pick a deterministic topic + verse. Every user sees the same verse on the same day, creating congregation synchronization. The result is cached in `daily_cache.json` — only one API call per day across all users on the same machine.
+
+---
+
+## Safety & Trust
+
+- Bible text always from `bible-api.com` — never AI-generated
+- Gemini prompt explicitly says: "NEVER invent, paraphrase, or modify Bible verses"
+- Gemini safety filters set to `BLOCK_MEDIUM_AND_ABOVE`
+- Trust badge on every scripture card: "✓ Scripture sourced from bible-api.com"
+- Reference validation before any API call
+- JSON parse failure returns safe defaults — UI never breaks
+
+---
+
+## Roadmap
+
+- [ ] **Audio devotionals** — TTS integration, "listen mode" for commute/bedtime
+- [ ] **Visual verse cards** — image generation with church branding
+- [ ] **Social scheduling** — queue Instagram/WhatsApp posts for the week
+- [ ] **Church admin panel** — pin devotional of the day, approve content
+- [ ] **FastAPI + React migration** — `services/` become REST endpoints, zero logic changes
 
 ---
 
 ## Deployment
 
-### Streamlit Cloud (free)
-1. Push to GitHub
-2. Connect at [share.streamlit.io](https://share.streamlit.io)
-3. Add secret: `GEMINI_API_KEY = "your_key"`
+### Streamlit Cloud
+```
+GEMINI_API_KEY = "your_key"   # in Streamlit secrets
+```
 
 ### Docker
 ```dockerfile
@@ -116,39 +113,3 @@ RUN pip install -r requirements.txt
 EXPOSE 8501
 CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
 ```
-
-### Migrating to FastAPI + React
-- `services/` → FastAPI route handlers, no logic changes
-- `utils/formatters.py` → shared utility library
-- `utils/storage.py` → swap CSV implementation for PostgreSQL
-- `app.py` → replace entirely with React frontend
-
----
-
-## Extending Topics
-
-In `services/verse_service.py`, add to `TOPIC_VERSES`:
-```python
-"Patience": [
-    "Romans 5:3-4", "James 1:3-4", "Psalm 27:14",
-    "Hebrews 12:1", "Isaiah 40:31", "Lamentations 3:25",
-],
-```
-
----
-
-## Safety & Reliability
-- Bible text always from `bible-api.com` — never AI-generated
-- Gemini prompt explicitly forbids scripture fabrication
-- Gemini safety filters set to `BLOCK_MEDIUM_AND_ABOVE` on all harm categories
-- JSON parse failure returns safe fallback — UI never breaks
-- API timeout: 8s for Bible API, exponential backoff for Gemini
-
----
-
-## Future Roadmap
-- [ ] **Daily verse scheduler** — morning email/WhatsApp push via cron + SendGrid/Twilio
-- [ ] **Content approval queue** — admin marks AI output as approved before publishing
-- [ ] **FastAPI backend** — services become REST endpoints, React SPA frontend
-- [ ] **SQLite/Postgres** — swap `storage.py`, enable multi-user church teams
-- [ ] **Multi-language** — bible-api.com supports Spanish/French; add locale param to verse service

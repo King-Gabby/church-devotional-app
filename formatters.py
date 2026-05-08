@@ -1,27 +1,19 @@
 """
-formatters.py
-
-Formats devotional content for social media platforms and export.
-Zero AI calls — pure string transformation logic.
+utils/formatters.py
+Social media and export formatting. Zero AI calls.
 """
 
-import csv
-import io
-import json
+import csv, io, json
 from datetime import datetime
 
-# Platform character limits
 INSTAGRAM_LIMIT = 2200
 WHATSAPP_LIMIT = 700
 TWITTER_LIMIT = 280
 
+def _c(t: str) -> str:
+    return t.strip().replace("\n", " ")
 
-def _c(text: str) -> str:
-    """Clean and normalize text."""
-    return text.strip().replace("\n", " ")
-
-
-def _build_hashtags(topic: str) -> str:
+def _hashtags(topic: str) -> str:
     base = ["#DailyDevotional", "#BibleVerse", "#ChurchLife", "#Faith", "#WordOfGod"]
     if topic and topic != "General":
         tag = f"#{topic.replace(' ', '')}"
@@ -29,81 +21,52 @@ def _build_hashtags(topic: str) -> str:
             base.insert(0, tag)
     return " ".join(base[:6])
 
-
-# ---------------------------------------------------------------------------
-# Platform formatters
-# ---------------------------------------------------------------------------
-
 def format_instagram(d: dict) -> str:
-    ref = d["reference"]
-    verse = _c(d["verse_text"])
-    topic = d.get("topic", "")
-    explanation = _c(d.get("explanation", ""))
-    reflection = _c(d.get("reflection_question", ""))
-    application = _c(d.get("application", ""))
-    memory = _c(d.get("memory_summary", ""))
-    prayer = _c(d.get("prayer_prompt", ""))
-
     lines = [
-        f"📖 {ref}",
-        f'"{verse}"',
+        f"📖 {d['reference']}",
+        f'"{_c(d["verse_text"])}"',
         "",
-        f"✨ {explanation}",
+        f"✨ {_c(d.get('explanation',''))}",
         "",
-        f"🤔 Reflect: {reflection}",
+        f"🤔 Reflect: {_c(d.get('reflection_question',''))}",
         "",
-        f"👣 Apply: {application}",
+        f"👣 Apply: {_c(d.get('application',''))}",
     ]
-    if memory:
-        lines += ["", f"💡 Remember: {memory}"]
-    if prayer:
-        lines += ["", f"🙏 {prayer}"]
-    lines += ["", _build_hashtags(topic)]
-
-    caption = "\n".join(lines)
-    return caption[:INSTAGRAM_LIMIT]
-
+    if d.get("memory_summary"):
+        lines += ["", f"💡 Remember: {_c(d['memory_summary'])}"]
+    if d.get("prayer_prompt"):
+        lines += ["", f"🙏 {_c(d['prayer_prompt'])}"]
+    lines += ["", _hashtags(d.get("topic", ""))]
+    return "\n".join(lines)[:INSTAGRAM_LIMIT]
 
 def format_whatsapp(d: dict) -> str:
-    ref = d["reference"]
-    verse = _c(d["verse_text"])
-    explanation = _c(d.get("explanation", ""))
-    application = _c(d.get("application", ""))
-
-    verse_short = verse if len(verse) <= 200 else verse[:197] + "..."
-
+    v = _c(d["verse_text"])
     lines = [
-        f"📖 *{ref}*",
-        f"_{verse_short}_",
+        f"📖 *{d['reference']}*",
+        f"_{v[:200]}{'...' if len(v)>200 else ''}_",
         "",
-        explanation,
+        _c(d.get("explanation", "")),
         "",
-        f"👉 {application}",
+        f"👉 {_c(d.get('application',''))}",
     ]
     return "\n".join(lines)[:WHATSAPP_LIMIT]
 
-
 def format_twitter(d: dict) -> str:
-    ref = d["reference"]
     topic = d.get("topic", "")
-    tag = f"#{topic.replace(' ', '')}" if topic and topic != "General" else "#DailyDevotional"
-    message = _c(d.get("memory_summary") or d.get("application") or d.get("explanation", ""))
-
-    base = f"📖 {ref} | {message} {tag} #Bible"
+    tag = f"#{topic.replace(' ','')}" if topic and topic != "General" else "#DailyDevotional"
+    msg = _c(d.get("memory_summary") or d.get("application") or d.get("explanation", ""))
+    base = f"📖 {d['reference']} | {msg} {tag} #Bible"
     if len(base) <= TWITTER_LIMIT:
         return base
-
-    overhead = len(f"📖 {ref} |  {tag} #Bible") + 4  # 4 = " ..." space
-    return f"📖 {ref} | {message[:TWITTER_LIMIT - overhead]}... {tag} #Bible"
-
+    overhead = len(f"📖 {d['reference']} |  {tag} #Bible") + 4
+    return f"📖 {d['reference']} | {msg[:TWITTER_LIMIT - overhead]}... {tag} #Bible"
 
 def format_full_text(d: dict) -> str:
-    """Plain-text full devotional for download or display."""
     lines = [
-        "=" * 40,
-        f"Daily Devotional — {d.get('topic', 'General')}",
-        f"Scripture: {d['reference']}",
-        "=" * 40,
+        "=" * 44,
+        f"Daily Devotional — {d.get('topic','General')}",
+        f"Scripture: {d['reference']} ({d.get('translation_id','KJV')})",
+        "=" * 44,
         "",
         f'"{d["verse_text"]}"',
         "",
@@ -123,39 +86,25 @@ def format_full_text(d: dict) -> str:
     lines += ["", f"Generated: {datetime.now().strftime('%B %d, %Y')}"]
     return "\n".join(lines)
 
+CSV_FIELDS = ["date","topic","reference","translation","verse_text","explanation",
+              "reflection_question","application","memory_summary","prayer_prompt"]
 
-# ---------------------------------------------------------------------------
-# CSV export helpers
-# ---------------------------------------------------------------------------
-
-CSV_FIELDS = [
-    "date", "topic", "reference", "translation",
-    "verse_text", "explanation", "reflection_question",
-    "application", "memory_summary", "prayer_prompt",
-]
-
-
-def devotional_to_row(d: dict) -> dict:
+def to_row(d: dict) -> dict:
     return {
         "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "topic": d.get("topic", ""),
-        "reference": d.get("reference", ""),
-        "translation": d.get("translation_id", "KJV"),
-        "verse_text": d.get("verse_text", ""),
-        "explanation": d.get("explanation", ""),
-        "reflection_question": d.get("reflection_question", ""),
-        "application": d.get("application", ""),
-        "memory_summary": d.get("memory_summary", ""),
-        "prayer_prompt": d.get("prayer_prompt", ""),
+        "topic": d.get("topic",""), "reference": d.get("reference",""),
+        "translation": d.get("translation_id","KJV"), "verse_text": d.get("verse_text",""),
+        "explanation": d.get("explanation",""), "reflection_question": d.get("reflection_question",""),
+        "application": d.get("application",""), "memory_summary": d.get("memory_summary",""),
+        "prayer_prompt": d.get("prayer_prompt",""),
     }
-
 
 def devotionals_to_csv(devotionals: list[dict]) -> str:
     if not devotionals:
         return ""
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=CSV_FIELDS)
-    writer.writeheader()
+    w = csv.DictWriter(buf, fieldnames=CSV_FIELDS)
+    w.writeheader()
     for d in devotionals:
-        writer.writerow(devotional_to_row(d))
+        w.writerow(to_row(d))
     return buf.getvalue()
