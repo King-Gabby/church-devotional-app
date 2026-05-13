@@ -6,6 +6,7 @@ Run:  streamlit run app.py
 Env:  GEMINI_API_KEY  (in .env or Streamlit secrets)
 """
 
+import time
 import streamlit as st
 from datetime import datetime
 
@@ -26,6 +27,7 @@ from storage import (
     load_favorites, save_favorite, remove_favorite, is_favorite,
     get_cached_daily, cache_daily, topic_counts, get_streak,
 )
+from fallbacks import get_offline_devotional
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG  (must be first Streamlit call)
@@ -41,13 +43,15 @@ st.set_page_config(
 # SESSION STATE  — single initialisation block, no scattered guards
 # ─────────────────────────────────────────────────────────────
 _DEFAULTS: dict = {
-    "devotional":    None,            # active devotional dict
-    "sermon":        None,            # active sermon dict
-    "prayer_result": None,            # active prayer dict
-    "study":         None,            # active study dict
-    "journey_day":   1,               # journey day selector
-    "sel_topic":     ALL_TOPICS[0],   # topic selector
-    "mode":          "today",         # active nav section key
+    "devotional":      None,            # active devotional dict
+    "sermon":          None,            # active sermon dict
+    "prayer_result":   None,            # active prayer dict
+    "study":           None,            # active study dict
+    "journey_day":     1,               # journey day selector
+    "sel_topic":       ALL_TOPICS[0],   # topic selector
+    "mode":            "today",         # active nav section key
+    "last_gen_time":   0.0,             # cooldown: epoch seconds of last generation
+    "generating":      False,           # guard: prevents duplicate calls on rerun
 }
 for _k, _v in _DEFAULTS.items():
     if _k not in st.session_state:
@@ -1030,10 +1034,10 @@ def _quota_notice() -> None:
         '<strong>Using an offline reflection</strong>'
         'The AI reached its usage limit for this moment. A thoughtful fallback '
         'has been prepared — your devotional is still complete. '
-        'Try again in a few minutes if youd prefer a freshly generated reflection.'
+        'Try again in a few minutes if you prefer a freshly generated reflection.'
         '</div></div>',
         unsafe_allow_html=True,
-          )
+    )
 
 
 def render_scripture(d: dict) -> None:
@@ -1183,10 +1187,22 @@ def render_social_export(d: dict) -> None:
 
 # ─────────────────────────────────────────────────────────────
 # CORE GENERATION FUNCTION
-# Single entry point — no duplicated logic across modes.
-# Returns the devotional dict and writes to session state.
-# Does NOT call st.rerun() — the caller decides if needed.
+# Guards against duplicate calls on Streamlit reruns.
+# Enforces a 15-second cooldown between generations.
 # ─────────────────────────────────────────────────────────────
+_COOLDOWN_SEC = 15
+
+
+def _can_generate() -> bool:
+    """True if enough time has passed since last generation."""
+    return (time.time() - st.session_state.get("last_gen_time", 0.0)) >= _COOLDOWN_SEC
+
+
+def _cooldown_remaining() -> int:
+    elapsed = time.time() - st.session_state.get("last_gen_time", 0.0)
+    return max(0, int(_COOLDOWN_SEC - elapsed))
+
+
 def _generate(
     verse: dict,
     topic: str,
@@ -1195,25 +1211,47 @@ def _generate(
     include_memory: bool = True,
 ) -> dict:
     """
-    Generate a devotional from a verse dict.
-    Reads verse['text'] (canonical key).
-    Writes result to st.session_state.devotional.
-    Returns the generated dict.
+    Generate a devotional. Guards:
+    - Session-state dedup: if st.session_state.generating is True, return existing
+    - Cooldown: minimum 15 s between Gemini calls
+    - Returns existing devotional rather than re-calling if already matching
     """
-    with st.spinner(""):
-        d = generate_devotional(
-            reference      = verse.get("reference", ""),
-            verse_text     = verse.get("text", ""),      # canonical
-            topic          = topic,
-            journey_theme  = journey_theme,
-            include_prayer = include_prayer,
-            include_memory = include_memory,
-        )
-        d["translation_id"] = verse.get("translation_id", "KJV")
-        d["_fallback"]      = verse.get("_fallback", False)
-        st.session_state.devotional = d
-        save_devotional(d)
-    return d
+    # Guard 1: already mid-generation (Streamlit rerun during spinner)
+    if st.session_state.get("generating"):
+        existing = st.session_state.get("devotional")
+        if existing:
+            return existing
+
+    # Guard 2: cooldown
+    if not _can_generate():
+        secs = _cooldown_remaining()
+        st.warning(f"Please wait {secs}s before generating again.")
+        existing = st.session_state.get("devotional")
+        if existing:
+            return existing
+        return get_offline_devotional()
+
+    st.session_state.generating = True
+    st.session_state.last_gen_time = time.time()
+
+    try:
+        with st.spinner(""):
+            d = generate_devotional(
+                reference      = verse.get("reference", ""),
+                verse_text     = verse.get("text", ""),
+                topic          = topic,
+                journey_theme  = journey_theme,
+                include_prayer = include_prayer,
+                include_memory = include_memory,
+            )
+            d["translation_id"] = verse.get("translation_id", "KJV")
+            d["_fallback"]      = verse.get("_fallback", False)
+            st.session_state.devotional = d
+            save_devotional(d)
+    finally:
+        st.session_state.generating = False
+
+    return st.session_state.devotional
 
 
 # ══════════════════════════════════════════════════════════════
