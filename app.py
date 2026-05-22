@@ -28,6 +28,10 @@ from storage import (
     get_cached_daily, cache_daily, topic_counts, get_streak,
 )
 from fallbacks import get_offline_devotional
+from church_identity import (
+    load_identity, save_identity, get_identity,
+    get_accent_css, ACCENT_THEMES, THEME_NAMES,
+)
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG  (must be first Streamlit call)
@@ -56,12 +60,14 @@ _DEFAULTS: dict = {
 for _k, _v in _DEFAULTS.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
+load_identity()  # merge any persisted JSON identity over defaults
 
 
 # ══════════════════════════════════════════════════════════════
-#  DESIGN SYSTEM — Cathedral Minimalism v2
-#  Warm charcoal (not pure black), layered surfaces, gold glow.
-#  Fully themed Streamlit widgets. Button-based sidebar nav.
+#  DESIGN SYSTEM — Cathedral Minimalism v3
+#  + Church Identity accent system
+#  + Improved sidebar hierarchy
+#  + Warmer surfaces, better contrast
 # ══════════════════════════════════════════════════════════════
 st.markdown("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -69,35 +75,36 @@ st.markdown("""
 
 <style>
 /* ═══════════════════════════════════════════════════════════
-   1. DESIGN TOKENS
-   Warm charcoal palette — cathedral minimalism, not AMOLED black.
+   1. DESIGN TOKENS — warm charcoal, cathedral minimalism
+   Gold vars are overridden per-theme by get_accent_css()
    ═══════════════════════════════════════════════════════════ */
 :root {
-  /* ── Surface stack: 5 clearly-separable warm charcoal tones ── */
-  --bg:          #17130f;   /* page background — warm near-black    */
-  --bg-raised:   #1e1912;   /* sidebar, slightly lifted             */
-  --bg-card:     #252018;   /* card surface — visible on background  */
-  --bg-card-h:   #2d2820;   /* card hover                           */
-  --bg-input:    #1e1912;   /* inputs, selects                      */
-  --bg-dropdown: #26201a;   /* dropdown/popover panels              */
-  --bg-dropdown-h:#302820;  /* dropdown item hover                  */
+  /* Surface stack — 6 distinct warm tones (visible separation) */
+  --bg:           #1a1510;   /* page — warm dark charcoal             */
+  --bg-raised:    #211c15;   /* sidebar background                    */
+  --bg-card:      #2a2318;   /* card surface                          */
+  --bg-card-h:    #332c1e;   /* card hover                            */
+  --bg-input:     #211c15;   /* text inputs, selects                  */
+  --bg-dropdown:  #2d2519;   /* dropdown panel                        */
+  --bg-dropdown-h:#3a3022;   /* dropdown item hover                   */
 
-  /* ── Gold system ── */
-  --gold:        #c8922a;
-  --gold-lt:     #daa84a;
-  --gold-dim:    rgba(200, 146, 42, 0.09);
-  --gold-glow:   rgba(200, 146, 42, 0.05);
-  --gold-border: rgba(200, 146, 42, 0.18);
-  --gold-hi:     rgba(200, 146, 42, 0.30);
+  /* Gold system — overridden by theme preset */
+  --gold:         #c8922a;
+  --gold-lt:      #daa84a;
+  --gold-dim:     rgba(200,146,42,0.09);
+  --gold-border:  rgba(200,146,42,0.18);
+  --gold-hi:      rgba(200,146,42,0.30);
 
-  /* ── Typography scale ── */
-  --text-prim:   #ede2cc;   /* headings, scripture — warm cream     */
-  --text-body:   #c8b896;   /* body copy — readable warm            */
-  --text-sec:    #9a8464;   /* secondary — sidebar nav labels       */
-  --text-mute:   #5e4e36;   /* metadata, footnotes                  */
-  --text-prayer: #b8c4ec;   /* prayer card text                     */
+  /* Typography — improved contrast throughout */
+  --text-prim:    #f0e6d0;   /* scripture, headings — bright warm     */
+  --text-body:    #cfc0a0;   /* body copy — readable                  */
+  --text-sec:     #a09070;   /* nav labels, secondary                 */
+  --text-mute:    #6a5840;   /* metadata, footnotes                   */
+  --text-prayer:  #bcc8ec;   /* prayer card                           */
+  --text-nav:     #b0a080;   /* sidebar nav items — brighter than sec */
+  --text-nav-act: #e8d0a0;   /* active nav item                       */
 
-  /* ── Spacing ── */
+  /* Spacing */
   --sp-2xs: 0.2rem;
   --sp-xs:  0.35rem;
   --sp-sm:  0.6rem;
@@ -106,31 +113,28 @@ st.markdown("""
   --sp-xl:  2rem;
   --sp-2xl: 3rem;
 
-  /* ── Shape ── */
-  --r-xs:   4px;
-  --r-sm:   6px;
-  --r-md:   10px;
-  --r-lg:   14px;
+  /* Shape */
+  --r-xs:   4px;  --r-sm: 6px;
+  --r-md:   10px; --r-lg: 14px;
   --r-pill: 9999px;
 
-  /* ── Motion ── */
+  /* Motion */
   --t-fast: 0.14s ease;
   --t-med:  0.24s ease;
 
-  /* ── Shadows ── */
-  --sh-card:  0 2px 16px rgba(0,0,0,0.30);
-  --sh-scrip: 0 6px 36px rgba(0,0,0,0.42);
+  /* Shadows */
+  --sh-card:  0 2px 16px rgba(0,0,0,0.28);
+  --sh-scrip: 0 6px 36px rgba(0,0,0,0.40);
 }
 
 /* ═══════════════════════════════════════════════════════════
-   2. BASE RESET + BODY
+   2. BASE
    ═══════════════════════════════════════════════════════════ */
 html {
   font-size: 16px;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
-
 body {
   font-family: 'EB Garamond', Georgia, serif;
   color: var(--text-body);
@@ -138,17 +142,13 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-
-/* App background — subtle warm radial glow top-left */
 .stApp {
   background:
-    radial-gradient(ellipse 90% 50% at 8% 0%, rgba(200,146,42,0.04) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 40% at 92% 100%, rgba(38,44,90,0.05) 0%, transparent 60%),
+    radial-gradient(ellipse 80% 45% at 8% 0%,  rgba(200,146,42,0.05) 0%, transparent 60%),
+    radial-gradient(ellipse 55% 35% at 92% 100%, rgba(38,44,90,0.06)  0%, transparent 60%),
     var(--bg);
   min-height: 100vh;
 }
-
-/* Main content area — centred, comfortable reading width */
 .main .block-container {
   max-width: 880px;
   padding: var(--sp-xl) var(--sp-lg) 6rem;
@@ -156,207 +156,240 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   3. SIDEBAR — warm charcoal, slightly deeper than main content
+   3. SIDEBAR ARCHITECTURE
+   3-zone layout: brand/identity → nav → utilities
    ═══════════════════════════════════════════════════════════ */
 [data-testid="stSidebar"] {
   background-color: var(--bg-raised);
-  background-image:
-    linear-gradient(180deg,
-      rgba(200,146,42,0.025) 0%,
-      transparent 40%
-    );
+  background-image: linear-gradient(170deg,
+    rgba(200,146,42,0.025) 0%, transparent 35%);
   border-right: 1px solid var(--gold-border);
+  min-width: 240px !important;
 }
-
-/* Remove default Streamlit sidebar padding so our nav fills edge-to-edge */
 [data-testid="stSidebar"] > div:first-child {
   padding: 0 !important;
 }
 
-/* ── Brand block ── */
-.sidebar-brand {
-  padding: 1.4rem 1.2rem 1rem;
+/* ── Zone 1: App brand ── */
+.sb-app-brand {
+  padding: 1.3rem 1.2rem 0.9rem;
   text-align: center;
   border-bottom: 1px solid var(--gold-border);
-  margin-bottom: 0.5rem;
 }
-.sidebar-symbol {
+.sb-app-symbol {
   display: block;
-  font-size: 1.4rem;
+  font-size: 1.1rem;
   color: var(--gold);
-  letter-spacing: 0.55em;
+  letter-spacing: 0.7em;
+  margin-left: 0.7em; /* compensate letter-spacing */
   animation: ember 5s ease-in-out infinite alternate;
 }
-.sidebar-name {
+.sb-app-name {
   display: block;
   font-family: 'Cormorant Garamond', serif;
-  font-size: 1.35rem;
+  font-size: 1.3rem;
   font-weight: 600;
   color: var(--text-prim);
-  letter-spacing: 0.04em;
-  margin-top: 0.45rem;
+  letter-spacing: 0.05em;
+  margin-top: 0.4rem;
   line-height: 1;
 }
-.sidebar-tagline {
+.sb-app-tagline {
   display: block;
   font-family: 'EB Garamond', serif;
-  font-size: 0.66rem;
+  font-size: 0.64rem;
   color: var(--text-mute);
-  letter-spacing: 0.16em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  margin-top: 0.35rem;
+  margin-top: 0.28rem;
 }
-.sidebar-streak {
+
+/* ── Zone 1b: Church identity block ── */
+.sb-church-block {
+  padding: 0.7rem 1.2rem 0.9rem;
+  text-align: center;
+  border-bottom: 1px solid rgba(200,146,42,0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+}
+.sb-church-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--gold-border);
+  margin-bottom: 0.2rem;
+}
+.sb-church-name {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-sec);
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sb-church-subtitle {
+  font-family: 'EB Garamond', serif;
+  font-size: 0.68rem;
+  color: var(--text-mute);
+  font-style: italic;
+  letter-spacing: 0.04em;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sb-streak {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  margin-top: 0.6rem;
-  padding: 0.18rem 0.7rem;
+  gap: 0.25rem;
+  padding: 0.15rem 0.6rem;
   background: var(--gold-dim);
-  border: 1px solid var(--gold-hi);
+  border: 1px solid var(--gold-border);
   border-radius: var(--r-pill);
   font-family: 'EB Garamond', serif;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: var(--gold-lt);
+  margin-top: 0.25rem;
 }
 
-/* ── Nav section group labels ── */
-.nav-group {
-  padding: 0.9rem 1rem 0.2rem;
+/* ── Zone 2: Navigation ── */
+.sb-nav-section {
+  padding: 0.5rem 0.5rem 0.2rem;
+}
+.sb-nav-group-label {
+  padding: 0.65rem 0.8rem 0.15rem;
   font-family: 'EB Garamond', serif;
-  font-size: 0.6rem;
+  font-size: 0.58rem;
   font-weight: 600;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.24em;
   text-transform: uppercase;
   color: var(--text-mute);
+  user-select: none;
 }
-
-/* ── Nav items — button-based, styled as premium rail items ── */
-/* Outer wrapper div that carries active class */
-.nav-item > div > button,
-.nav-active > div > button {
+/* Nav item wrapper — carries active/inactive class */
+.sb-nav-item > div > button,
+.sb-nav-active > div > button {
   width: 100% !important;
   text-align: left !important;
   justify-content: flex-start !important;
-  border-radius: var(--r-sm) !important;
   border: none !important;
-  padding: 0.48rem 1rem !important;
-  font-family: 'EB Garamond', serif !important;
-  font-size: 0.96rem !important;
-  letter-spacing: 0.01em !important;
-  line-height: 1.3 !important;
-  min-height: unset !important;
-  transition: background var(--t-fast), color var(--t-fast), border-left-color var(--t-fast) !important;
   border-left: 2px solid transparent !important;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0 !important;
   background: transparent !important;
-  color: var(--text-sec) !important;
+  color: var(--text-nav) !important;
+  font-family: 'EB Garamond', serif !important;
+  font-size: 0.97rem !important;
+  letter-spacing: 0.01em !important;
+  line-height: 1.25 !important;
+  min-height: unset !important;
+  padding: 0.44rem 0.85rem !important;
   box-shadow: none !important;
+  transition: background var(--t-fast), color var(--t-fast),
+              border-left-color var(--t-fast) !important;
 }
-.nav-item > div > button:hover {
+.sb-nav-item > div > button:hover {
   background: var(--gold-dim) !important;
   color: var(--text-body) !important;
-  border-left-color: rgba(200,146,42,0.35) !important;
+  border-left-color: rgba(200,146,42,0.30) !important;
 }
-.nav-active > div > button {
-  background: rgba(200,146,42,0.10) !important;
-  color: var(--gold-lt) !important;
+.sb-nav-active > div > button {
+  background: rgba(200,146,42,0.08) !important;
+  color: var(--text-nav-act) !important;
   border-left-color: var(--gold) !important;
 }
-.nav-active > div > button:hover {
-  background: rgba(200,146,42,0.14) !important;
+.sb-nav-active > div > button:hover {
+  background: rgba(200,146,42,0.12) !important;
 }
 
-/* Nav container padding */
-.nav-section {
-  padding: 0 0.6rem 0.4rem;
+/* ── Zone 3: Utilities (bottom) ── */
+.sb-util-section {
+  padding: 0.4rem 0.8rem 0.6rem;
 }
-
-/* Sidebar settings area */
-.sidebar-settings {
-  padding: 0.6rem 1rem 0.4rem;
-}
-.sidebar-settings-label {
+.sb-util-label {
+  display: block;
   font-family: 'EB Garamond', serif;
-  font-size: 0.62rem;
-  letter-spacing: 0.16em;
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--text-mute);
   margin-bottom: 0.3rem;
-  display: block;
 }
-.sidebar-date {
+.sb-date {
   font-family: 'EB Garamond', serif;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--text-mute);
   text-align: center;
   font-style: italic;
   line-height: 1.8;
-  padding: 0.6rem 1rem 1rem;
+  padding: 0.5rem 0.8rem 0.9rem;
 }
 
-/* ─── Override Streamlit's sidebar button styles so they don't fight ours ─── */
+/* Override ALL Streamlit sidebar button styles */
 [data-testid="stSidebar"] .stButton > button {
   background: transparent !important;
   border: none !important;
   border-left: 2px solid transparent !important;
-  border-radius: var(--r-sm) !important;
-  color: var(--text-sec) !important;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0 !important;
+  color: var(--text-nav) !important;
   font-family: 'EB Garamond', serif !important;
-  font-size: 0.96rem !important;
+  font-size: 0.97rem !important;
   text-align: left !important;
   justify-content: flex-start !important;
   width: 100% !important;
   min-height: unset !important;
-  padding: 0.48rem 1rem !important;
-  line-height: 1.3 !important;
-  letter-spacing: 0.01em !important;
+  padding: 0.44rem 0.85rem !important;
+  line-height: 1.25 !important;
   box-shadow: none !important;
-  transition: background var(--t-fast), color var(--t-fast), border-left-color var(--t-fast) !important;
+  transition: background var(--t-fast), color var(--t-fast),
+              border-left-color var(--t-fast) !important;
 }
 [data-testid="stSidebar"] .stButton > button:hover {
   background: var(--gold-dim) !important;
   color: var(--text-body) !important;
-  border-left-color: rgba(200,146,42,0.35) !important;
+  border-left-color: rgba(200,146,42,0.30) !important;
   transform: none !important;
 }
-[data-testid="stSidebar"] .stButton > button:active {
-  transform: none !important;
-}
+[data-testid="stSidebar"] .stButton > button:active { transform: none !important; }
 
-/* Sidebar selectbox */
+/* Sidebar selects, toggles */
 [data-testid="stSidebar"] .stSelectbox > div > div {
   background: var(--bg-card) !important;
   border: 1px solid var(--gold-border) !important;
   border-radius: var(--r-sm) !important;
   color: var(--text-body) !important;
   font-family: 'EB Garamond', serif !important;
-  font-size: 0.92rem !important;
+  font-size: 0.9rem !important;
 }
 [data-testid="stSidebar"] .stSelectbox label {
   font-family: 'EB Garamond', serif !important;
-  font-size: 0.62rem !important;
-  letter-spacing: 0.15em !important;
+  font-size: 0.58rem !important;
+  letter-spacing: 0.2em !important;
   text-transform: uppercase !important;
   color: var(--text-mute) !important;
 }
 [data-testid="stSidebar"] hr {
   border: none !important;
   border-top: 1px solid var(--gold-border) !important;
-  margin: 0.4rem 1rem !important;
+  margin: 0.35rem 0.8rem !important;
   opacity: 1 !important;
 }
 [data-testid="stSidebar"] .stToggle label {
   font-family: 'EB Garamond', serif !important;
-  font-size: 0.9rem !important;
+  font-size: 0.88rem !important;
   color: var(--text-sec) !important;
 }
 
 /* ═══════════════════════════════════════════════════════════
-   4. TYPOGRAPHY SYSTEM
-   Hierarchical scale using clamp() for fluid responsiveness.
+   4. TYPOGRAPHY
    ═══════════════════════════════════════════════════════════ */
-
-/* Page titles */
 .page-hd { margin-bottom: var(--sp-xl); }
 .page-hd-title {
   font-family: 'Cormorant Garamond', serif;
@@ -375,8 +408,6 @@ body {
   margin-top: 0.35rem;
   line-height: 1.5;
 }
-
-/* Date ribbon */
 .date-ribbon {
   display: inline-flex;
   align-items: center;
@@ -396,7 +427,7 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   5. SCRIPTURE BLOCK — emotional centrepiece
+   5. SCRIPTURE BLOCK
    ═══════════════════════════════════════════════════════════ */
 .scripture-wrap {
   position: relative;
@@ -411,7 +442,6 @@ body {
   overflow: hidden;
   animation: rise 0.5s cubic-bezier(0.22,1,0.36,1) both;
 }
-/* Decorative opening quote */
 .scripture-wrap::before {
   content: '\201C';
   position: absolute;
@@ -423,7 +453,6 @@ body {
   pointer-events: none;
   user-select: none;
 }
-/* Bottom shimmer */
 .scripture-wrap::after {
   content: '';
   position: absolute;
@@ -475,7 +504,7 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   6. CONTENT CARDS — clearly visible on warm-charcoal background
+   6. CONTENT CARDS
    ═══════════════════════════════════════════════════════════ */
 .card {
   background: var(--bg-card);
@@ -483,13 +512,12 @@ body {
   border-radius: var(--r-md);
   padding: var(--sp-lg) clamp(0.9rem, 2.5vw, 1.55rem);
   margin-bottom: var(--sp-sm);
-  transition: border-color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
+  transition: border-color var(--t-fast), background var(--t-fast);
   animation: rise 0.38s cubic-bezier(0.22,1,0.36,1) both;
 }
 .card:hover {
   border-color: var(--gold-hi);
   background: var(--bg-card-h);
-  box-shadow: 0 3px 16px rgba(200,146,42,0.06);
 }
 .card-label {
   font-family: 'EB Garamond', serif;
@@ -498,7 +526,7 @@ body {
   letter-spacing: 0.25em;
   text-transform: uppercase;
   color: var(--gold);
-  opacity: 0.85;
+  opacity: 0.9;
   margin-bottom: 0.55rem;
   display: block;
 }
@@ -508,20 +536,14 @@ body {
   line-height: 1.78;
   color: var(--text-body);
 }
-
-/* Prayer variant — indigo tint for visual distinction */
 .card-prayer {
-  background: rgba(34, 40, 80, 0.50);
-  border-color: rgba(80, 100, 210, 0.18);
+  background: rgba(34,40,80,0.48);
+  border-color: rgba(80,100,210,0.18);
 }
 .card-prayer .card-label { color: #8892d0; opacity: 1; }
 .card-prayer .card-body  { color: var(--text-prayer); font-style: italic; }
-
-/* Memory verse — gold tint, centred */
 .card-memory {
-  background: linear-gradient(
-    135deg, rgba(200,146,42,0.08) 0%, rgba(20,14,8,0.45) 100%
-  );
+  background: linear-gradient(135deg, rgba(200,146,42,0.08) 0%, rgba(20,14,8,0.45) 100%);
   border-color: rgba(200,146,42,0.26);
   text-align: center;
   padding: var(--sp-xl);
@@ -535,7 +557,7 @@ body {
   color: var(--text-prim);
 }
 
-/* ── API quota / error notice — elegant, not alarming ── */
+/* ── API quota notice ── */
 .api-notice {
   display: flex;
   align-items: flex-start;
@@ -547,29 +569,17 @@ body {
   margin-bottom: var(--sp-lg);
   animation: fadeIn 0.4s ease both;
 }
-.api-notice-icon {
-  font-size: 1rem;
-  color: var(--gold);
-  flex-shrink: 0;
-  margin-top: 0.1rem;
-  opacity: 0.7;
-}
+.api-notice-icon { font-size: 1rem; color: var(--gold); flex-shrink: 0; opacity: 0.7; margin-top: 0.1rem; }
 .api-notice-body {
   font-family: 'EB Garamond', serif;
   font-size: 0.94rem;
   line-height: 1.6;
   color: var(--text-sec);
 }
-.api-notice-body strong {
-  color: var(--gold-lt);
-  font-weight: 600;
-  display: block;
-  margin-bottom: 0.2rem;
-}
+.api-notice-body strong { color: var(--gold-lt); font-weight: 600; display: block; margin-bottom: 0.2rem; }
 
-/* ── Fallback verse notice ── */
 .fallback-note {
-  background: rgba(110, 80, 10, 0.18);
+  background: rgba(110,80,10,0.18);
   border: 1px solid rgba(200,148,0,0.25);
   border-radius: var(--r-sm);
   padding: var(--sp-sm) var(--sp-md);
@@ -589,77 +599,21 @@ body {
   transition: background var(--t-fast);
 }
 .sermon-point:hover { background: var(--bg-card-h); }
-.sermon-point-num {
-  font-family: 'EB Garamond', serif;
-  font-size: 0.62rem;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--gold);
-  margin-bottom: var(--sp-2xs);
-}
-.sermon-point-title {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 1.08rem;
-  font-weight: 600;
-  color: var(--text-prim);
-  margin-bottom: var(--sp-xs);
-}
-.sermon-illus {
-  font-size: 0.9rem;
-  color: var(--text-mute);
-  font-style: italic;
-  margin-top: var(--sp-xs);
-}
+.sermon-point-num   { font-size: 0.62rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold); margin-bottom: var(--sp-2xs); }
+.sermon-point-title { font-family: 'Cormorant Garamond', serif; font-size: 1.08rem; font-weight: 600; color: var(--text-prim); margin-bottom: var(--sp-xs); }
+.sermon-illus       { font-size: 0.9rem; color: var(--text-mute); font-style: italic; margin-top: var(--sp-xs); }
 
-/* ── Analytics metrics ── */
-.metric-box {
-  background: var(--bg-card);
-  border: 1px solid var(--gold-border);
-  border-radius: var(--r-md);
-  padding: var(--sp-lg) var(--sp-md);
-  text-align: center;
-}
-.metric-num {
-  display: block;
-  font-family: 'Cormorant Garamond', serif;
-  font-size: clamp(1.8rem, 4vw, 2.4rem);
-  font-weight: 700;
-  color: var(--text-prim);
-  line-height: 1;
-}
-.metric-lbl {
-  display: block;
-  font-family: 'EB Garamond', serif;
-  font-size: 0.65rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--text-mute);
-  margin-top: 0.35rem;
-}
+/* ── Metrics ── */
+.metric-box { background: var(--bg-card); border: 1px solid var(--gold-border); border-radius: var(--r-md); padding: var(--sp-lg) var(--sp-md); text-align: center; }
+.metric-num { display: block; font-family: 'Cormorant Garamond', serif; font-size: clamp(1.8rem,4vw,2.4rem); font-weight: 700; color: var(--text-prim); line-height: 1; }
+.metric-lbl { display: block; font-family: 'EB Garamond', serif; font-size: 0.65rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-mute); margin-top: 0.35rem; }
 
 /* ── Empty states ── */
-.empty-state {
-  text-align: center;
-  padding: var(--sp-2xl) 0;
-  opacity: 0.45;
-}
-.empty-state-icon {
-  display: block;
-  font-size: 2rem;
-  color: var(--gold);
-  margin-bottom: var(--sp-sm);
-  animation: ember 4s ease-in-out infinite alternate;
-}
-.empty-state-text {
-  font-family: 'EB Garamond', serif;
-  font-size: 0.95rem;
-  font-style: italic;
-  color: var(--text-mute);
-  line-height: 1.65;
-  white-space: pre-line;
-}
+.empty-state { text-align: center; padding: var(--sp-2xl) 0; opacity: 0.45; }
+.empty-state-icon { display: block; font-size: 2rem; color: var(--gold); margin-bottom: var(--sp-sm); animation: ember 4s ease-in-out infinite alternate; }
+.empty-state-text { font-family: 'EB Garamond', serif; font-size: 0.95rem; font-style: italic; color: var(--text-mute); line-height: 1.65; white-space: pre-line; }
 
-/* ── Social export ── */
+/* ── Export box ── */
 .export-box {
   background: var(--bg-raised);
   border: 1px solid var(--gold-border);
@@ -681,21 +635,53 @@ body {
 .char-track { height: 2px; background: var(--gold-border); border-radius: 1px; margin-top: 5px; }
 .char-fill  { height: 100%; border-radius: 1px; background: var(--gold); transition: width 0.3s; }
 
-/* ── Divider ornament ── */
-.vdivide {
-  display: flex; align-items: center;
-  gap: var(--sp-md);
-  margin: var(--sp-xl) 0 var(--sp-lg);
-}
+/* ── Divider ── */
+.vdivide { display: flex; align-items: center; gap: var(--sp-md); margin: var(--sp-xl) 0 var(--sp-lg); }
 .vdivide-line { flex: 1; height: 1px; background: var(--gold-hi); opacity: 0.45; }
 .vdivide-sym  { font-size: 0.62rem; letter-spacing: 0.38em; color: var(--gold); opacity: 0.55; user-select: none; }
 
+/* ── Church Settings mode ── */
+.settings-section {
+  background: var(--bg-card);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--r-md);
+  padding: var(--sp-lg) var(--sp-xl);
+  margin-bottom: var(--sp-lg);
+}
+.settings-section-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-prim);
+  margin-bottom: var(--sp-md);
+  padding-bottom: var(--sp-sm);
+  border-bottom: 1px solid var(--gold-border);
+}
+.theme-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--gold-border);
+  background: var(--gold-dim);
+  font-family: 'EB Garamond', serif;
+  font-size: 0.82rem;
+  color: var(--text-sec);
+  cursor: default;
+}
+.theme-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 /* ═══════════════════════════════════════════════════════════
-   7. STREAMLIT WIDGET OVERRIDES
-   Fully themed — no white components. Scoped selectors only.
+   7. STREAMLIT WIDGET OVERRIDES — no white components
    ═══════════════════════════════════════════════════════════ */
 
-/* ── Buttons — main content area ── */
+/* Main content buttons */
 .main .stButton > button {
   font-family: 'EB Garamond', serif;
   font-size: 1rem;
@@ -715,9 +701,7 @@ body {
   box-shadow: 0 3px 14px rgba(200,146,42,0.22);
   transform: translateY(-1px);
 }
-.main .stButton > button[kind="primary"]:active {
-  transform: none; box-shadow: none;
-}
+.main .stButton > button[kind="primary"]:active { transform: none; box-shadow: none; }
 .main .stButton > button:not([kind="primary"]) {
   background: transparent;
   border: 1px solid var(--gold-border);
@@ -725,10 +709,10 @@ body {
 }
 .main .stButton > button:not([kind="primary"]):hover {
   border-color: var(--gold-hi);
-  background: var(--gold-glow);
+  background: var(--gold-dim);
 }
 
-/* ── Text inputs ── */
+/* Text inputs */
 .stTextInput > div > div > input {
   background: var(--bg-input) !important;
   border: 1px solid var(--gold-border) !important;
@@ -745,13 +729,9 @@ body {
   outline: none !important;
 }
 .stTextInput > div > div > input::placeholder { color: var(--text-mute) !important; }
-.stTextInput label {
-  font-family: 'EB Garamond', serif !important;
-  color: var(--text-mute) !important;
-  font-size: 0.82rem !important;
-}
+.stTextInput label { font-family: 'EB Garamond', serif !important; color: var(--text-mute) !important; font-size: 0.82rem !important; }
 
-/* ── Selectbox — the field ── */
+/* Selectbox */
 .stSelectbox > div > div {
   background: var(--bg-input) !important;
   border: 1px solid var(--gold-border) !important;
@@ -760,13 +740,21 @@ body {
   font-family: 'EB Garamond', serif !important;
   font-size: 0.98rem !important;
 }
-.stSelectbox label {
-  font-family: 'EB Garamond', serif !important;
+.stSelectbox label { font-family: 'EB Garamond', serif !important; color: var(--text-mute) !important; font-size: 0.82rem !important; }
+
+/* File uploader */
+[data-testid="stFileUploaderDropzone"] {
+  background: var(--bg-input) !important;
+  border: 1px dashed var(--gold-border) !important;
+  border-radius: var(--r-sm) !important;
+}
+[data-testid="stFileUploaderDropzone"] span,
+[data-testid="stFileUploaderDropzone"] p {
   color: var(--text-mute) !important;
-  font-size: 0.82rem !important;
+  font-family: 'EB Garamond', serif !important;
 }
 
-/* ── Dropdown popover — kills the white panel ── */
+/* Dropdowns/popovers — eliminate white panels */
 [data-baseweb="popover"] {
   background: var(--bg-dropdown) !important;
   border: 1px solid var(--gold-border) !important;
@@ -777,10 +765,7 @@ body {
   background: var(--bg-dropdown) !important;
   border-radius: var(--r-sm) !important;
 }
-[data-baseweb="menu"] ul {
-  background: var(--bg-dropdown) !important;
-  padding: var(--sp-xs) !important;
-}
+[data-baseweb="menu"] ul { background: var(--bg-dropdown) !important; padding: var(--sp-xs) !important; }
 [data-baseweb="menu-item"] {
   background: transparent !important;
   color: var(--text-body) !important;
@@ -795,14 +780,10 @@ body {
   background: var(--bg-dropdown-h) !important;
   color: var(--text-prim) !important;
 }
-/* The select value display text */
-[data-baseweb="select"] [data-testid="stMarkdownContainer"] p,
-[data-baseweb="select"] span {
-  color: var(--text-body) !important;
-  font-family: 'EB Garamond', serif !important;
-}
+[data-baseweb="select"] span,
+[data-baseweb="select"] [data-testid="stMarkdownContainer"] p { color: var(--text-body) !important; font-family: 'EB Garamond', serif !important; }
 
-/* ── Tabs ── */
+/* Tabs */
 .stTabs [data-baseweb="tab-list"] {
   background: transparent;
   gap: 0;
@@ -819,42 +800,24 @@ body {
   border-bottom: 2px solid transparent;
   transition: color var(--t-fast), border-color var(--t-fast);
 }
-.stTabs [aria-selected="true"] {
-  color: var(--gold) !important;
-  border-bottom-color: var(--gold);
-  background: transparent;
-}
-.stTabs [data-baseweb="tab"]:hover:not([aria-selected="true"]) {
-  color: var(--text-sec) !important;
-  background: transparent;
-}
-.stTabs [data-baseweb="tab-panel"] {
-  padding: var(--sp-md) 0 !important;
-}
+.stTabs [aria-selected="true"] { color: var(--gold) !important; border-bottom-color: var(--gold); background: transparent; }
+.stTabs [data-baseweb="tab"]:hover:not([aria-selected="true"]) { color: var(--text-sec) !important; }
+.stTabs [data-baseweb="tab-panel"] { padding: var(--sp-md) 0 !important; }
 
-/* ── Expanders ── */
+/* Expanders */
 [data-testid="stExpander"] {
   background: var(--bg-card) !important;
   border: 1px solid var(--gold-border) !important;
   border-radius: var(--r-md) !important;
   margin-bottom: var(--sp-sm) !important;
 }
-[data-testid="stExpander"] summary {
-  font-family: 'EB Garamond', serif !important;
-  font-size: 0.96rem !important;
-  color: var(--text-body) !important;
-  padding: 0.75rem 1rem !important;
-}
+[data-testid="stExpander"] summary { font-family: 'EB Garamond', serif !important; font-size: 0.96rem !important; color: var(--text-body) !important; padding: 0.75rem 1rem !important; }
 [data-testid="stExpander"] summary:hover { color: var(--text-prim) !important; }
 
-/* ── Toggles ── */
-.stToggle label {
-  font-family: 'EB Garamond', serif !important;
-  font-size: 0.9rem !important;
-  color: var(--text-sec) !important;
-}
+/* Toggles */
+.stToggle label { font-family: 'EB Garamond', serif !important; font-size: 0.9rem !important; color: var(--text-sec) !important; }
 
-/* ── Text area ── */
+/* Text area */
 .stTextArea textarea {
   background: var(--bg-input) !important;
   border: 1px solid var(--gold-border) !important;
@@ -864,129 +827,65 @@ body {
   font-size: 0.96rem !important;
 }
 
-/* ── Captions ── */
-.stCaption {
-  font-family: 'EB Garamond', serif !important;
-  font-size: 0.8rem !important;
-  color: var(--text-mute) !important;
-}
-
-/* ── Toast notifications ── */
-.stToast {
-  background: var(--bg-card) !important;
-  border: 1px solid var(--gold-border) !important;
-  color: var(--text-body) !important;
-  font-family: 'EB Garamond', serif !important;
-}
-
-/* ── Streamlit default error/warning — override the red wall ── */
-.stException, .stError {
-  background: rgba(160, 40, 40, 0.12) !important;
-  border: 1px solid rgba(200, 60, 60, 0.25) !important;
-  border-radius: var(--r-sm) !important;
-  color: #e8a0a0 !important;
-  font-family: 'EB Garamond', serif !important;
-}
-.stSuccess {
-  background: rgba(40,100,60,0.12) !important;
-  border: 1px solid rgba(60,160,80,0.22) !important;
-  border-radius: var(--r-sm) !important;
-  font-family: 'EB Garamond', serif !important;
-}
-.stWarning {
-  background: rgba(160,120,20,0.12) !important;
-  border: 1px solid rgba(200,160,30,0.22) !important;
-  border-radius: var(--r-sm) !important;
-  font-family: 'EB Garamond', serif !important;
-}
-
-/* ── Spinner ── */
-.stSpinner > div {
-  border-color: var(--gold) transparent transparent !important;
-}
-
-/* ── Bar chart tinting ── */
+/* System messages */
+.stCaption { font-family: 'EB Garamond', serif !important; font-size: 0.8rem !important; color: var(--text-mute) !important; }
+.stToast   { background: var(--bg-card) !important; border: 1px solid var(--gold-border) !important; color: var(--text-body) !important; font-family: 'EB Garamond', serif !important; }
+.stException, .stError { background: rgba(160,40,40,0.12) !important; border: 1px solid rgba(200,60,60,0.25) !important; border-radius: var(--r-sm) !important; color: #e8a0a0 !important; font-family: 'EB Garamond', serif !important; }
+.stSuccess  { background: rgba(40,100,60,0.12) !important; border: 1px solid rgba(60,160,80,0.22) !important; border-radius: var(--r-sm) !important; font-family: 'EB Garamond', serif !important; }
+.stWarning  { background: rgba(160,120,20,0.12) !important; border: 1px solid rgba(200,160,30,0.22) !important; border-radius: var(--r-sm) !important; font-family: 'EB Garamond', serif !important; }
+.stSpinner > div { border-color: var(--gold) transparent transparent !important; }
 .stVegaLiteChart { animation: fadeIn 0.4s ease both; }
 
 /* ═══════════════════════════════════════════════════════════
    8. STREAMLIT CHROME — preserve mobile sidebar toggle
    ═══════════════════════════════════════════════════════════ */
-
-/*
-  DO NOT hide the header entirely — it contains the mobile
-  hamburger menu. Instead, make it transparent.
-*/
-[data-testid="stHeader"] {
-  background: transparent !important;
-  border-bottom: none !important;
-}
-/* Hide toolbar (share/deploy buttons) but keep sidebar toggle */
+[data-testid="stHeader"] { background: transparent !important; border-bottom: none !important; }
 [data-testid="stToolbar"] { display: none !important; }
-
-/* Ensure sidebar collapse/expand button is always visible */
 [data-testid="stSidebarCollapsedControl"],
-[data-testid="collapsedControl"] {
-  display: flex !important;
-  visibility: visible !important;
-}
+[data-testid="collapsedControl"] { display: flex !important; visibility: visible !important; }
 button[aria-label="Open sidebar"],
 button[aria-label="Close sidebar"] {
-  display: flex !important;
-  visibility: visible !important;
+  display: flex !important; visibility: visible !important;
   color: var(--gold) !important;
   background: rgba(200,146,42,0.08) !important;
   border-radius: var(--r-sm) !important;
 }
-
-/* Hide decorative chrome */
 [data-testid="stDecoration"] { display: none !important; }
-.stDeployButton              { display: none !important; }
-footer                       { display: none !important; }
-#MainMenu                    { display: none !important; }
+.stDeployButton { display: none !important; }
+footer { display: none !important; }
+#MainMenu { display: none !important; }
 
 /* ═══════════════════════════════════════════════════════════
    9. ANIMATIONS
    ═══════════════════════════════════════════════════════════ */
-@keyframes rise {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
+@keyframes rise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
 @keyframes ember {
-  from { text-shadow: 0 0 7px  rgba(200,146,42,0.22), 0 0 16px rgba(200,146,42,0.07); }
+  from { text-shadow: 0 0 7px rgba(200,146,42,0.22), 0 0 16px rgba(200,146,42,0.07); }
   to   { text-shadow: 0 0 16px rgba(200,146,42,0.52), 0 0 34px rgba(200,146,42,0.16), 0 0 52px rgba(200,146,42,0.04); }
 }
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
+@keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
 
 /* ═══════════════════════════════════════════════════════════
    10. RESPONSIVE
    ═══════════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
-  .main .block-container {
-    padding: var(--sp-md) var(--sp-sm) 5rem;
-  }
-  .scripture-wrap {
-    padding: var(--sp-lg) var(--sp-md) var(--sp-md);
-    margin-bottom: var(--sp-lg);
-  }
+  .main .block-container { padding: var(--sp-md) var(--sp-sm) 5rem; }
+  .scripture-wrap { padding: var(--sp-lg) var(--sp-md); margin-bottom: var(--sp-lg); }
   .card { padding: var(--sp-md); }
   .card-memory { padding: var(--sp-lg) var(--sp-md); }
-  .vdivide { margin: var(--sp-lg) 0 var(--sp-md); }
+  .settings-section { padding: var(--sp-md); }
 }
-
 @media (max-width: 480px) {
-  .scripture-text {
-    font-size: 1.2rem;
-    line-height: 1.78;
-  }
+  .scripture-text { font-size: 1.2rem; line-height: 1.78; }
   .page-hd-title { font-size: 1.5rem; }
-  .page-hd-sub   { font-size: 0.95rem; }
-  .card-body     { font-size: 1rem; }
 }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ── Inject theme accent override immediately after base CSS ──
+_identity_now = get_identity()
+st.markdown(get_accent_css(_identity_now.get("accent_theme", "Gold Ember")), unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1255,72 +1154,104 @@ def _generate(
 
 
 # ══════════════════════════════════════════════════════════════
-#  SIDEBAR — Button-rail navigation, no radio circles
+#  SIDEBAR — 3-zone architecture
+#  Zone 1: App brand + church identity
+#  Zone 2: Navigation rail (grouped, button-based)
+#  Zone 3: Utilities (translation, toggles, date)
 # ══════════════════════════════════════════════════════════════
 
-# Nav definition: (key, label) — key stored in session_state.mode
 _NAV_GROUPS = [
-    ("Daily", [
+    (None, [   # no group label for primary item
         ("today",   "☀  Today's Word"),
     ]),
     ("Devotionals", [
         ("topic",   "📖  By Topic"),
         ("journey", "🗺  7-Day Journey"),
-        ("search",  "🔍  Search a Verse"),
+        ("search",  "🔍  Search"),
     ]),
     ("Tools", [
-        ("sermon",  "🎙  Sermon Mode"),
-        ("study",   "📚  Bible Study"),
+        ("sermon",  "🎙  Sermon"),
+        ("study",   "📚  Study"),
         ("prayer",  "🙏  Prayer"),
     ]),
     ("Library", [
         ("saved",     "⭐  Saved"),
         ("analytics", "📊  Analytics"),
         ("history",   "📁  History"),
+        ("settings",  "⚙  Church Settings"),
     ]),
 ]
 
 with st.sidebar:
-    # ── Brand ──
-    streak = get_streak()
-    streak_html = (
-        f'<div class="sidebar-streak">🔥 {streak}-day streak</div>'
-        if streak > 0 else ""
-    )
+    identity = get_identity()
+    church_name     = (identity.get("church_name") or "").strip()[:32]
+    church_subtitle = (identity.get("church_subtitle") or "").strip()[:45]
+    logo_bytes      = identity.get("logo_bytes")
+    streak          = get_streak()
+
+    # ── Zone 1: App brand ──────────────────────────────────────
     st.markdown(
-        f'<div class="sidebar-brand">'
-        f'  <span class="sidebar-symbol">✦  ✦  ✦</span>'
-        f'  <span class="sidebar-name">The Word</span>'
-        f'  <span class="sidebar-tagline">Daily Devotional</span>'
-        f'  {streak_html}'
-        f'</div>',
+        '<div class="sb-app-brand">'
+        '  <span class="sb-app-symbol">✦  ✦  ✦</span>'
+        '  <span class="sb-app-name">The Word</span>'
+        '  <span class="sb-app-tagline">Daily Devotional</span>'
+        '</div>',
         unsafe_allow_html=True,
     )
 
-    # ── Navigation rail ──
-    # Each group renders a small uppercase label then button items.
-    # Active item gets a gold left-border via CSS class on the container div.
-    current = st.session_state.get("mode", "today")
-    for group_label, items in _NAV_GROUPS:
+    # ── Zone 1b: Church identity ───────────────────────────────
+    if church_name:
+        logo_html = ""
+        if logo_bytes:
+            import base64
+            b64 = base64.b64encode(logo_bytes).decode()
+            logo_html = f'<img src="data:image/png;base64,{b64}" class="sb-church-logo" alt="Church logo">'
+        streak_html = (
+            f'<span class="sb-streak">🔥 {streak} days</span>' if streak > 0 else ""
+        )
+        subtitle_html = (
+            f'<span class="sb-church-subtitle">{church_subtitle}</span>'
+            if church_subtitle else ""
+        )
         st.markdown(
-            f'<div class="nav-group">{group_label}</div>',
+            f'<div class="sb-church-block">'
+            f'  {logo_html}'
+            f'  <span class="sb-church-name">{church_name}</span>'
+            f'  {subtitle_html}'
+            f'  {streak_html}'
+            f'</div>',
             unsafe_allow_html=True,
         )
-        st.markdown('<div class="nav-section">', unsafe_allow_html=True)
+    else:
+        if streak > 0:
+            st.markdown(
+                f'<div style="text-align:center;padding:0.4rem 0 0.6rem;">'
+                f'<span class="sb-streak">🔥 {streak} days</span></div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── Zone 2: Navigation ──────────────────────────────────────
+    current = st.session_state.get("mode", "today")
+    st.markdown('<div class="sb-nav-section">', unsafe_allow_html=True)
+    for group_label, items in _NAV_GROUPS:
+        if group_label:
+            st.markdown(
+                f'<div class="sb-nav-group-label">{group_label}</div>',
+                unsafe_allow_html=True,
+            )
         for key, label in items:
-            active_class = "nav-active" if current == key else "nav-item"
-            st.markdown(f'<div class="{active_class}">', unsafe_allow_html=True)
+            css_cls = "sb-nav-active" if current == key else "sb-nav-item"
+            st.markdown(f'<div class="{css_cls}">', unsafe_allow_html=True)
             if st.button(label, key=f"nav_{key}", use_container_width=True):
                 st.session_state.mode = key
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
+    # ── Zone 3: Utilities ───────────────────────────────────────
     st.divider()
-
-    # ── Settings ──
-    st.markdown('<div class="sidebar-settings">', unsafe_allow_html=True)
-    st.markdown('<span class="sidebar-settings-label">Translation</span>', unsafe_allow_html=True)
+    st.markdown('<div class="sb-util-section">', unsafe_allow_html=True)
+    st.markdown('<span class="sb-util-label">Translation</span>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     translation = st.selectbox(
@@ -1334,21 +1265,18 @@ with st.sidebar:
         }[x],
     )
 
-    st.divider()
-
     tc, mc = st.columns(2)
     with tc: include_prayer = st.toggle("Prayer", value=True)
     with mc: include_memory = st.toggle("Memory", value=True)
 
-    st.divider()
     st.markdown(
-        f'<div class="sidebar-date">'
+        f'<div class="sb-date">'
         f'{datetime.now().strftime("%A")}<br>{datetime.now().strftime("%B %d, %Y")}'
         f'</div>',
         unsafe_allow_html=True,
     )
 
-# Resolve active mode from session state
+# Resolve active mode
 mode = st.session_state.get("mode", "today")
 
 
@@ -1949,3 +1877,149 @@ elif mode == "history":
                 "Download CSV", b, "history.csv", "text/csv",
                 use_container_width=True,
             )
+
+
+# ══════════════════════════════════════════════════════════════
+#  ⚙  CHURCH SETTINGS
+#  Controlled branding personalisation — no arbitrary overrides.
+# ══════════════════════════════════════════════════════════════
+elif mode == "settings":
+    _header("Church Settings", "Personalise the app identity for your congregation.")
+
+    import base64
+    identity = get_identity()
+
+    # ── Church Name ────────────────────────────────────────────
+    st.markdown(
+        '<div class="settings-section">'
+        '<div class="settings-section-title">Church Identity</div>',
+        unsafe_allow_html=True,
+    )
+
+    church_name_input = st.text_input(
+        "Church name",
+        value=st.session_state.get("church_name", ""),
+        max_chars=32,
+        placeholder="e.g. Redeemed House Assembly",
+        help="Displayed in the sidebar beneath the app name. Max 32 characters.",
+    )
+
+    church_subtitle_input = st.text_input(
+        "Tagline / subtitle",
+        value=st.session_state.get("church_subtitle", ""),
+        max_chars=45,
+        placeholder="e.g. Walking in Light & Truth",
+        help="Optional short line below the church name. Max 45 characters.",
+    )
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Logo Upload ────────────────────────────────────────────
+    st.markdown(
+        '<div class="settings-section">'
+        '<div class="settings-section-title">Church Logo</div>',
+        unsafe_allow_html=True,
+    )
+
+    logo_file = st.file_uploader(
+        "Upload logo",
+        type=["png", "jpg", "jpeg", "webp"],
+        help="Optional. Displayed as a small circular emblem in the sidebar.",
+        label_visibility="collapsed",
+    )
+
+    current_logo = st.session_state.get("logo_bytes")
+    if logo_file is not None:
+        new_bytes = logo_file.read()
+        if len(new_bytes) <= 500_000:   # 500 KB max
+            st.session_state.logo_bytes = new_bytes
+            b64 = base64.b64encode(new_bytes).decode()
+            st.markdown(
+                f'<div style="display:flex;justify-content:center;margin:var(--sp-md) 0;">'
+                f'<img src="data:image/png;base64,{b64}" '
+                f'style="width:64px;height:64px;border-radius:50%;object-fit:cover;'
+                f'border:1px solid var(--gold-border);" alt="Preview"></div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.warning("Image is too large. Please use a file under 500 KB.")
+    elif current_logo:
+        b64 = base64.b64encode(current_logo).decode()
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:var(--sp-md);margin:var(--sp-sm) 0;">'
+            f'<img src="data:image/png;base64,{b64}" '
+            f'style="width:48px;height:48px;border-radius:50%;object-fit:cover;'
+            f'border:1px solid var(--gold-border);" alt="Current logo">'
+            f'<span style="font-family:\'EB Garamond\',serif;font-size:0.88rem;'
+            f'color:var(--text-mute);font-style:italic;">Current logo</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        rc, _ = st.columns([1, 4])
+        with rc:
+            if st.button("Remove logo"):
+                st.session_state.logo_bytes = None
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Accent Theme ───────────────────────────────────────────
+    st.markdown(
+        '<div class="settings-section">'
+        '<div class="settings-section-title">Accent Theme</div>',
+        unsafe_allow_html=True,
+    )
+
+    current_theme = st.session_state.get("accent_theme", "Gold Ember")
+    _SWATCH_COLORS = {
+        "Gold Ember":        "#c8922a",
+        "Royal Indigo":      "#7c6fc0",
+        "Ivory Dawn":        "#b8956a",
+        "Crimson Covenant":  "#b05060",
+        "Olive Sanctuary":   "#7a9e6a",
+    }
+
+    # Render theme cards as a 5-column button grid
+    theme_cols = st.columns(5)
+    for i, (tname, tcolor) in enumerate(_SWATCH_COLORS.items()):
+        with theme_cols[i]:
+            active = current_theme == tname
+            st.markdown(
+                f'<div style="text-align:center;margin-bottom:var(--sp-xs);">'
+                f'<div style="width:28px;height:28px;border-radius:50%;'
+                f'background:{tcolor};margin:0 auto var(--sp-xs);'
+                f'border:2px solid {"#fff" if active else "transparent"};'
+                f'box-shadow:{"0 0 0 2px " + tcolor if active else "none"};"></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                tname,
+                key=f"theme_{tname}",
+                type="primary" if active else "secondary",
+                use_container_width=True,
+            ):
+                st.session_state.accent_theme = tname
+                save_identity()
+                st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Save ───────────────────────────────────────────────────
+    if st.button("Save Church Identity", type="primary", use_container_width=True):
+        st.session_state.church_name     = church_name_input.strip()[:32]
+        st.session_state.church_subtitle = church_subtitle_input.strip()[:45]
+        save_identity()
+        st.success("Church identity saved.")
+        st.rerun()
+
+    # ── Reset ──────────────────────────────────────────────────
+    _divider()
+    rc2, _ = st.columns([1, 3])
+    with rc2:
+        if st.button("Reset to defaults"):
+            st.session_state.church_name     = "The Word"
+            st.session_state.church_subtitle = "Daily Devotional"
+            st.session_state.accent_theme    = "Gold Ember"
+            st.session_state.logo_bytes      = None
+            save_identity()
+            st.rerun()
